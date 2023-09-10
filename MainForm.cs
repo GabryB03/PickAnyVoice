@@ -7,9 +7,11 @@ using System.Drawing;
 using System.IO;
 using System.Net;
 using System.Runtime.InteropServices;
+using System.Speech.Synthesis;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
+
 
 public partial class MainForm : MetroForm
 {
@@ -19,6 +21,7 @@ public partial class MainForm : MetroForm
     private WaveIn _waveIn;
     private WaveFileWriter _waveFileWriter;
     private Process _process;
+    private bool _isGoogleVoice;
 
     [DllImport("winmm.dll")]
     private static extern Int32 mciSendString(string command, StringBuilder buffer, int bufferSize, IntPtr hwndCallback);
@@ -31,10 +34,19 @@ public partial class MainForm : MetroForm
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
+    private SpeechSynthesizer speechSynthesizer = new SpeechSynthesizer();
+
     public MainForm()
     {
         InitializeComponent();
+        Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.RealTime;
+        CheckForIllegalCrossThreadCalls = false;
         _theVoices = new List<string>();
+
+        foreach (InstalledVoice voice in speechSynthesizer.GetInstalledVoices())
+        {
+            guna2ComboBox4.Items.Add($"{voice.VoiceInfo.Name} ({voice.VoiceInfo.Culture.Name})");
+        }
 
         foreach (string directory in Directory.GetDirectories("data\\voices"))
         {
@@ -63,6 +75,102 @@ public partial class MainForm : MetroForm
         File.WriteAllText("data\\runtime\\gui_v2.bat", PickAnyVoice.Properties.Resources.V2BAT);
 
         CloseAllPythonInstances();
+
+        Thread thread1 = new Thread(CheckForNewVoices);
+        thread1.Priority = ThreadPriority.Highest;
+        thread1.Start();
+    }
+
+    private void CheckForNewVoices()
+    {
+        while (true)
+        {
+            Thread.Sleep(1000);
+            string[] dirs = Directory.GetDirectories("data\\voices");
+
+            if (dirs.Length != _theVoices.Count)
+            {
+                _theVoices.Clear();
+                listBox1.Items.Clear();
+
+                foreach (string dir in dirs)
+                {
+                    listBox1.Items.Add(Path.GetFileName(dir));
+                    _theVoices.Add(Path.GetFileName(dir));
+                }
+            }
+
+            foreach (string dir in dirs)
+            {
+                if (!File.Exists(dir + "\\exampleaudio.wav") && File.Exists(dir + "\\rvcmodelvoice.pth") && File.Exists(dir + "\\rvcmodelvoice.index"))
+                {
+                    if (File.Exists("C:\\rvcmodelvoice.pth"))
+                    {
+                        File.Delete("C:\\rvcmodelvoice.pth");
+                    }
+
+                    if (File.Exists("C:\\rvcmodelvoice.index"))
+                    {
+                        File.Delete("C:\\rvcmodelvoice.index");
+                    }
+
+                    if (File.Exists("C:\\input.wav"))
+                    {
+                        File.Delete("C:\\input.wav");
+                    }
+
+                    if (File.Exists("C:\\output.wav"))
+                    {
+                        File.Delete("C:\\output.wav");
+                    }
+
+                    if (File.Exists("C:\\recorded.wav"))
+                    {
+                        File.Delete("C:\\recorded.wav");
+                    }
+
+                    MessageBox.Show($"Press OK to generate example audio of the new added voice called \"{Path.GetFileName(dir)}\".", "PickAnyVoice", MessageBoxButtons.OK, MessageBoxIcon.Exclamation); ;
+                    File.Copy(dir + "\\rvcmodelvoice.pth", "C:\\rvcmodelvoice.pth");
+                    File.Copy(dir + "\\rvcmodelvoice.index", "C:\\rvcmodelvoice.index");
+                    
+                    if (guna2CheckBox1.Checked)
+                    {
+                        File.WriteAllText("data\\runtime\\infer-cli.bat", $"runtime\\python.exe infer_cli.py 0 \"C:\\input.wav\" \"C:\\output.wav\" \"C:\\rvcmodelvoice.pth\" \"C:\\rvcmodelvoice.index\" cuda:0 rmvpe\r\npause");
+                    }
+                    else
+                    {
+                        File.WriteAllText("data\\runtime\\infer-cli.bat", $"runtime\\python.exe infer_cli.py 0 \"C:\\input.wav\" \"C:\\output.wav\" \"C:\\rvcmodelvoice.pth\" \"\" cuda:0 rmvpe\r\npause");
+                    }
+
+                    RunFFMpeg($"-i \"{Path.GetFullPath("data\\exampleaudio.wav")}\" -af aresample=osf=s16:dither_method=triangular_hp -sample_fmt s16 -ar 48000 -ac 1 -b:a 96k -acodec pcm_s16le -filter:a \"highpass=f=50, lowpass=f=15000\" -map a \"C:\\input.wav\"");
+
+                    Process cmd = new Process();
+                    cmd.StartInfo.FileName = "cmd.exe";
+                    cmd.StartInfo.WorkingDirectory = Path.GetFullPath("data\\runtime");
+                    cmd.StartInfo.RedirectStandardInput = true;
+                    cmd.StartInfo.RedirectStandardOutput = true;
+                    cmd.StartInfo.CreateNoWindow = true;
+                    cmd.StartInfo.UseShellExecute = false;
+                    cmd.Start();
+
+                    cmd.StandardInput.WriteLine("infer-cli.bat");
+                    cmd.StandardInput.Flush();
+                    cmd.StandardInput.Close();
+                    cmd.WaitForExit();
+
+                    while (!File.Exists("C:\\output.wav"))
+                    {
+                        Thread.Sleep(1);
+                    }
+
+                    File.Delete("C:\\input.wav");
+                    RunFFMpeg($"-i \"C:\\output.wav\" -af aresample=osf=s16:dither_method=triangular_hp -sample_fmt s16 -ar 48000 -ac 1 -b:a 96k -acodec pcm_s16le -filter:a \"highpass=f=50, lowpass=f=15000\" -map a \"{Path.GetFullPath(dir + "\\exampleaudio.wav")}\"");
+                    File.Delete("C:\\output.wav");
+                    CloseAllPythonInstances();
+                    MessageBox.Show("Succesfully generated the example audio.", "PickAnyVoice", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+        }
     }
 
     private void guna2TextBox1_TextChanged(object sender, System.EventArgs e)
@@ -114,7 +222,15 @@ public partial class MainForm : MetroForm
         guna2Button7.Enabled = true;
         guna2Button8.Enabled = true;
         label4.Text = _currentVoiceName;
-        guna2CirclePictureBox1.Image = Image.FromFile($"data\\voices\\{_currentVoiceName}\\avatar.jpg");
+        
+        if (File.Exists($"data\\voices\\{_currentVoiceName}\\avatar.jpg"))
+        {
+            guna2CirclePictureBox1.Image = Image.FromFile($"data\\voices\\{_currentVoiceName}\\avatar.jpg");
+        }
+        else
+        {
+            guna2CirclePictureBox1.Image = null;
+        }
 
         if (File.Exists("C:\\rvcmodelvoice.pth"))
         {
@@ -197,7 +313,15 @@ public partial class MainForm : MetroForm
                 File.Delete(saveFileDialog1.FileName);
             }
 
-            File.WriteAllText("data\\runtime\\infer-cli.bat", $"runtime\\python.exe infer_cli.py {guna2ComboBox3.SelectedItem.ToString()} \"C:\\input.wav\" \"C:\\output.wav\" \"C:\\rvcmodelvoice.pth\" \"C:\\rvcmodelvoice.index\" cuda:0 rmvpe\r\npause");
+            if (guna2CheckBox1.Checked)
+            {
+                File.WriteAllText("data\\runtime\\infer-cli.bat", $"runtime\\python.exe infer_cli.py {guna2ComboBox3.SelectedItem.ToString()} \"C:\\input.wav\" \"C:\\output.wav\" \"C:\\rvcmodelvoice.pth\" \"C:\\rvcmodelvoice.index\" cuda:0 rmvpe\r\npause");
+            }
+            else
+            {
+                File.WriteAllText("data\\runtime\\infer-cli.bat", $"runtime\\python.exe infer_cli.py {guna2ComboBox3.SelectedItem.ToString()} \"C:\\input.wav\" \"C:\\output.wav\" \"C:\\rvcmodelvoice.pth\" \"\" cuda:0 rmvpe\r\npause");
+            }    
+
             RunFFMpeg($"-i \"{openFileDialog1.FileName}\" -af aresample=osf=s16:dither_method=triangular_hp -sample_fmt s16 -ar 48000 -ac 1 -b:a 96k -acodec pcm_s16le -filter:a \"highpass=f=50, lowpass=f=15000\" -map a \"C:\\input.wav\"");
 
             Process cmd = new Process();
@@ -297,7 +421,15 @@ public partial class MainForm : MetroForm
                     File.Delete("C:\\output.wav");
                 }
 
-                File.WriteAllText("data\\runtime\\infer-cli.bat", $"runtime\\python.exe infer_cli.py {guna2ComboBox3.SelectedItem.ToString()} \"C:\\input.wav\" \"C:\\output.wav\" \"C:\\rvcmodelvoice.pth\" \"C:\\rvcmodelvoice.index\" cuda:0 rmvpe\r\npause");
+                if (guna2CheckBox1.Checked)
+                {
+                    File.WriteAllText("data\\runtime\\infer-cli.bat", $"runtime\\python.exe infer_cli.py {guna2ComboBox3.SelectedItem.ToString()} \"C:\\input.wav\" \"C:\\output.wav\" \"C:\\rvcmodelvoice.pth\" \"C:\\rvcmodelvoice.index\" cuda:0 rmvpe\r\npause");
+                }
+                else
+                {
+                    File.WriteAllText("data\\runtime\\infer-cli.bat", $"runtime\\python.exe infer_cli.py {guna2ComboBox3.SelectedItem.ToString()} \"C:\\input.wav\" \"C:\\output.wav\" \"C:\\rvcmodelvoice.pth\" \"\" cuda:0 rmvpe\r\npause");
+                }
+
                 RunFFMpeg($"-i \"C:\\recorded.wav\" -af aresample=osf=s16:dither_method=triangular_hp -sample_fmt s16 -ar 48000 -ac 1 -b:a 96k -acodec pcm_s16le -filter:a \"highpass=f=50, lowpass=f=15000\" -map a \"C:\\input.wav\"");
                 File.Delete("C:\\recorded.wav");
 
@@ -487,6 +619,11 @@ public partial class MainForm : MetroForm
             File.Delete("C:\\temp.mp3");
         }
 
+        if (File.Exists("C:\\temp.wav"))
+        {
+            File.Delete("C:\\temp.wav");
+        }
+
         if (File.Exists("C:\\input.wav"))
         {
             File.Delete("C:\\input.wav");
@@ -497,18 +634,39 @@ public partial class MainForm : MetroForm
             File.Delete("C:\\output.wav");
         }
 
-        File.WriteAllText("data\\runtime\\infer-cli.bat", $"runtime\\python.exe infer_cli.py {guna2ComboBox3.SelectedItem.ToString()} \"C:\\input.wav\" \"C:\\output.wav\" \"C:\\rvcmodelvoice.pth\" \"C:\\rvcmodelvoice.index\" cuda:0 rmvpe\r\npause");
-        HttpWebRequest request = (HttpWebRequest)WebRequest.Create($"https://translate.google.com/translate_tts?ie=UTF-8&tl={language}&client=tw-ob&q={WebUtility.UrlEncode(text)}");
-        HttpWebResponse response = (HttpWebResponse)request.GetResponse();
-        Stream stream = response.GetResponseStream();
-        byte[] mp3Bytes = ReadFully(stream);
-        response.Close();
-        response.Dispose();
-        stream.Close();
-        stream.Dispose();
-        File.WriteAllBytes("C:\\temp.mp3", mp3Bytes);
-        RunFFMpeg($"-i \"C:\\temp.mp3\" -af aresample=osf=s16:dither_method=triangular_hp -sample_fmt s16 -ar 48000 -ac 1 -b:a 96k -acodec pcm_s16le -filter:a \"highpass=f=50, lowpass=f=15000\" -map a \"C:\\input.wav\"");
-        File.Delete("C:\\temp.mp3");
+        if (guna2CheckBox1.Checked)
+        {
+            File.WriteAllText("data\\runtime\\infer-cli.bat", $"runtime\\python.exe infer_cli.py {guna2ComboBox3.SelectedItem.ToString()} \"C:\\input.wav\" \"C:\\output.wav\" \"C:\\rvcmodelvoice.pth\" \"C:\\rvcmodelvoice.index\" cuda:0 rmvpe\r\npause");
+        }
+        else
+        {
+            File.WriteAllText("data\\runtime\\infer-cli.bat", $"runtime\\python.exe infer_cli.py {guna2ComboBox3.SelectedItem.ToString()} \"C:\\input.wav\" \"C:\\output.wav\" \"C:\\rvcmodelvoice.pth\" \"\" cuda:0 rmvpe\r\npause");
+        }
+
+        if (_isGoogleVoice)
+        {
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create($"https://translate.google.com/translate_tts?ie=UTF-8&tl={language}&client=tw-ob&q={WebUtility.UrlEncode(text)}");
+            HttpWebResponse response = (HttpWebResponse)request.GetResponse();
+            Stream stream = response.GetResponseStream();
+            byte[] mp3Bytes = ReadFully(stream);
+            response.Close();
+            response.Dispose();
+            stream.Close();
+            stream.Dispose();
+            File.WriteAllBytes("C:\\temp.mp3", mp3Bytes);
+            RunFFMpeg($"-i \"C:\\temp.mp3\" -af aresample=osf=s16:dither_method=triangular_hp -sample_fmt s16 -ar 48000 -ac 1 -b:a 96k -acodec pcm_s16le -filter:a \"highpass=f=50, lowpass=f=15000\" -map a \"C:\\input.wav\"");
+            File.Delete("C:\\temp.mp3");
+        }
+        else
+        {
+            speechSynthesizer.Volume = 100;
+            speechSynthesizer.Rate = 0;
+            speechSynthesizer.SetOutputToWaveFile("C:\\temp.wav");
+            speechSynthesizer.Speak(text);
+            speechSynthesizer.SetOutputToNull();
+            RunFFMpeg($"-i \"C:\\temp.wav\" -af aresample=osf=s16:dither_method=triangular_hp -sample_fmt s16 -ar 48000 -ac 1 -b:a 96k -acodec pcm_s16le -filter:a \"highpass=f=50, lowpass=f=15000\" -map a \"C:\\input.wav\"");
+            File.Delete("C:\\temp.wav");
+        }
 
         Process cmd = new Process();
         cmd.StartInfo.FileName = "cmd.exe";
@@ -545,7 +703,7 @@ public partial class MainForm : MetroForm
                 File.Delete(saveFileDialog1.FileName);
             }
 
-            string language = "en-EN";
+            string language = "";
 
             switch (guna2ComboBox4.SelectedIndex)
             {
@@ -570,6 +728,18 @@ public partial class MainForm : MetroForm
                 case 6:
                     language = "kr-KR";
                     break;
+            }
+
+            if (language == "")
+            {
+                _isGoogleVoice = false;
+                int difference = guna2ComboBox4.SelectedIndex - 7;
+                InstalledVoice voice = speechSynthesizer.GetInstalledVoices()[difference];
+                speechSynthesizer.SelectVoice(voice.VoiceInfo.Name);
+            }
+            else
+            {
+                _isGoogleVoice = true;
             }
 
             GenerateTTS(language, guna2TextBox2.Text, saveFileDialog1.FileName);
