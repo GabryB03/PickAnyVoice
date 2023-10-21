@@ -23,38 +23,14 @@ import glob
 import argparse
 import pdb
 import torch
+import time
 
 now_dir = os.getcwd()
 sys.path.append(now_dir)
 
-####
-# USAGE
-#
-# In your Terminal or CMD or whatever
-# python infer_cli.py [TRANSPOSE_VALUE] "[INPUT_PATH]" "[OUTPUT_PATH]" "[MODEL_PATH]" "[INDEX_FILE_PATH]" "[INFERENCE_DEVICE]" "[METHOD]"
-
 using_cli = False
 device = "cuda:0"
 is_half = False
-
-if len(sys.argv) > 0:
-    f0_up_key = int(sys.argv[1])  # transpose value
-    input_path = sys.argv[2]
-    output_path = sys.argv[3]
-    model_path = sys.argv[4]
-    file_index = sys.argv[5]  # .index file
-    device = sys.argv[6]
-    f0_method = sys.argv[7]  # pm or harvest or crepe
-
-    using_cli = True
-
-    # file_index2=sys.argv[8]
-    # index_rate=float(sys.argv[10]) #search feature ratio
-    # filter_radius=float(sys.argv[11]) #median filter
-    # resample_sr=float(sys.argv[12]) #resample audio in post processing
-    # rms_mix_rate=float(sys.argv[13]) #search feature
-    print(sys.argv)
-
 
 class Config:
     def __init__(self, device, is_half):
@@ -258,20 +234,40 @@ def get_vc(model_path):
     n_spk = cpt["config"][-3]
     # return {"visible": True,"maximum": n_spk, "__type__": "update"}
 
+inferFilePath = "_do_infer_.txt"
 
-if using_cli:
-    vc_single(
-        sid=0,
-        input_audio_path=input_path,
-        f0_up_key=f0_up_key,
-        f0_file=None,
-        f0_method=f0_method,
-        file_index=file_index,
-        file_index2="",
-        index_rate=1,
-        filter_radius=3,
-        resample_sr=0,
-        rms_mix_rate=0,
-        model_path=model_path,
-        output_path=output_path,
-    )
+while True:
+    time.sleep(0.001)
+    if os.path.exists(inferFilePath):
+        inferContent = ""
+        
+        with open(inferFilePath, "r") as file:
+            inferContent = file.read()
+
+        os.remove(inferFilePath)
+        inferLines = inferContent.splitlines()
+
+        iAudioPath = inferLines[0]
+        iF0UpKey = int(inferLines[1])
+        iFileIndex = inferLines[2]
+        iModelPath = inferLines[3]
+        iOutputPath = inferLines[4]
+
+        vc_single(
+            sid=0,
+            input_audio_path=iAudioPath,
+            f0_up_key=iF0UpKey,
+            f0_file=None,
+            f0_method="rmvpe",
+            file_index=iFileIndex,
+            file_index2="",
+            index_rate=1,
+            filter_radius=3,
+            resample_sr=0,
+            rms_mix_rate=0,
+            model_path=iModelPath,
+            output_path=iOutputPath,
+        )
+
+        with open("C:\\finished.txt", "w") as file:
+            pass

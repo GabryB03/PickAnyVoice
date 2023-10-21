@@ -63,6 +63,26 @@ namespace PickAnyVoice.Properties {
         /// <summary>
         ///   Cerca una risorsa localizzata di tipo System.Byte[].
         /// </summary>
+        internal static byte[] infer_edge {
+            get {
+                object obj = ResourceManager.GetObject("infer_edge", resourceCulture);
+                return ((byte[])(obj));
+            }
+        }
+        
+        /// <summary>
+        ///   Cerca una risorsa localizzata di tipo System.Byte[].
+        /// </summary>
+        internal static byte[] infer_google {
+            get {
+                object obj = ResourceManager.GetObject("infer_google", resourceCulture);
+                return ((byte[])(obj));
+            }
+        }
+        
+        /// <summary>
+        ///   Cerca una risorsa localizzata di tipo System.Byte[].
+        /// </summary>
         internal static byte[] pythoninfer {
             get {
                 object obj = ResourceManager.GetObject("pythoninfer", resourceCulture);

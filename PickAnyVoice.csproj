@@ -52,16 +52,16 @@
     <Reference Include="MetroSuite 2.0">
       <HintPath>..\..\Computer\Developing\CSharpBeautifulThemes\Libraries\MetroSuite\MetroSuite 2.0.dll</HintPath>
     </Reference>
+    <Reference Include="Microsoft.VisualBasic" />
     <Reference Include="System" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Net" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Net.Http.WebRequest" />
-    <Reference Include="System.Speech" />
     <Reference Include="System.Windows.Forms" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="FirefoxTheme.cs" />
+    <Compile Include="Utils\FirefoxTheme.cs" />
     <Compile Include="MainForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -74,7 +74,9 @@
       <DesignTime>True</DesignTime>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
-    <Compile Include="WindowInfo.cs" />
+    <Compile Include="Utils\TTS\EdgeTtsVoice.cs" />
+    <Compile Include="Utils\TTS\GoogleTtsVoice.cs" />
+    <Compile Include="Utils\WindowInfo.cs" />
     <EmbeddedResource Include="MainForm.resx">
       <DependentUpon>MainForm.cs</DependentUpon>
     </EmbeddedResource>
@@ -85,6 +87,8 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
+    <None Include="Resources\infer_edge.py" />
+    <None Include="Resources\infer_google.py" />
     <None Include="Resources\V2BAT.bat" />
   </ItemGroup>
   <ItemGroup>
@@ -98,6 +102,9 @@
     <None Include="Resources\pythoninfer.py" />
     <None Include="Resources\Tab2.png" />
     <None Include="Resources\Tab1.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="bin\x64\Release\data\" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

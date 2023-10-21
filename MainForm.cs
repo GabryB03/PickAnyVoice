@@ -1,17 +1,15 @@
 ﻿using MetroSuite;
+using Microsoft.VisualBasic;
 using NAudio.Wave;
+using PickAnyVoice.Properties;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
-using System.Net;
 using System.Runtime.InteropServices;
-using System.Speech.Synthesis;
-using System.Text;
 using System.Threading;
 using System.Windows.Forms;
-
 
 public partial class MainForm : MetroForm
 {
@@ -20,11 +18,11 @@ public partial class MainForm : MetroForm
     private string _currentVoiceName;
     private WaveIn _waveIn;
     private WaveFileWriter _waveFileWriter;
-    private Process _process;
-    private bool _isGoogleVoice;
-
-    [DllImport("winmm.dll")]
-    private static extern Int32 mciSendString(string command, StringBuilder buffer, int bufferSize, IntPtr hwndCallback);
+    private Process _process, _inferWaiter;
+    private WaveOutEvent _waveOutEvent;
+    private AudioFileReader _audioFileReader;
+    private List<EdgeTtsVoice> _edgeTtsVoices;
+    private List<GoogleTtsVoice> _googleTtsVoices;
 
     private delegate bool EnumThreadDelegate(IntPtr hWnd, IntPtr lParam);
 
@@ -34,19 +32,12 @@ public partial class MainForm : MetroForm
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
-    private SpeechSynthesizer speechSynthesizer = new SpeechSynthesizer();
-
     public MainForm()
     {
         InitializeComponent();
         Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.RealTime;
         CheckForIllegalCrossThreadCalls = false;
         _theVoices = new List<string>();
-
-        foreach (InstalledVoice voice in speechSynthesizer.GetInstalledVoices())
-        {
-            guna2ComboBox4.Items.Add($"{voice.VoiceInfo.Name} ({voice.VoiceInfo.Culture.Name})");
-        }
 
         foreach (string directory in Directory.GetDirectories("data\\voices"))
         {
@@ -65,20 +56,63 @@ public partial class MainForm : MetroForm
             guna2ComboBox2.Items.Add(WaveOut.GetCapabilities(waveOutDevice).ProductName);
         }
 
-        guna2ComboBox1.SelectedIndex = 0;
-        guna2ComboBox2.SelectedIndex = 0;
-        guna2ComboBox3.SelectedIndex = 12;
-        guna2ComboBox4.SelectedIndex = 0;
-
-        File.WriteAllBytes("data\\runtime\\infer_cli.py", PickAnyVoice.Properties.Resources.pythoninfer);
+        File.WriteAllBytes("data\\runtime\\_infer_waiter_.py", PickAnyVoice.Properties.Resources.pythoninfer);
         File.WriteAllBytes("data\\runtime\\gui_v2.py", PickAnyVoice.Properties.Resources.V2PYTHON);
         File.WriteAllText("data\\runtime\\gui_v2.bat", PickAnyVoice.Properties.Resources.V2BAT);
+        File.WriteAllText("data\\runtime\\_infer_waiter_.bat", "runtime\\python.exe _infer_waiter_.py --pycmd runtime\\python.exe\r\npause");
 
         CloseAllPythonInstances();
+        DeleteTempFiles(true);
+        StartInferWaiter();
 
         Thread thread1 = new Thread(CheckForNewVoices);
         thread1.Priority = ThreadPriority.Highest;
         thread1.Start();
+
+        _edgeTtsVoices = new List<EdgeTtsVoice>();
+        _googleTtsVoices = new List<GoogleTtsVoice>();
+
+        string[] edgeTtsLines = File.ReadAllLines("data\\tts\\edgetts.txt");
+
+        foreach (string line in edgeTtsLines)
+        {
+            string[] splitted1 = line.Split(' ');
+            string voiceName = splitted1[0];
+
+            string[] splitted2 = Strings.Split(line, " | ");
+            string completeVoiceName = splitted2[1];
+
+            string[] splitted3 = line.Split('(');
+            string[] splitted4 = splitted3[1].Split(')');
+            string[] splitted5 = Strings.Split(splitted4[0], ", ");
+
+            string language = splitted5[0], gender = splitted5[1];
+            _edgeTtsVoices.Add(new EdgeTtsVoice(voiceName, completeVoiceName, gender, language));
+        }
+
+        string[] googleTtsLines = File.ReadAllLines("data\\tts\\googletts.txt");
+
+        foreach (string line in googleTtsLines)
+        {
+            string[] splitted = Strings.Split(line, ": ");
+            string languageCode = splitted[0], languageName = splitted[1];
+            _googleTtsVoices.Add(new GoogleTtsVoice(languageCode, languageName));
+        }
+
+        guna2ComboBox1.SelectedIndex = 0;
+        guna2ComboBox2.SelectedIndex = 0;
+        guna2ComboBox3.SelectedIndex = 12;
+        guna2ComboBox4.SelectedIndex = 0;
+    }
+
+    private void StartInferWaiter()
+    {
+        _inferWaiter = new Process();
+        _inferWaiter.StartInfo.FileName = "_infer_waiter_.bat";
+        _inferWaiter.StartInfo.WorkingDirectory = Path.GetFullPath("data\\runtime");
+        _inferWaiter.StartInfo.WindowStyle = ProcessWindowStyle.Hidden;
+        _inferWaiter.StartInfo.CreateNoWindow = true;
+        _inferWaiter.Start();
     }
 
     private void CheckForNewVoices()
@@ -102,71 +136,51 @@ public partial class MainForm : MetroForm
 
             foreach (string dir in dirs)
             {
+                foreach (string theFile in Directory.GetFiles(dir))
+                {
+                    string extension = Path.GetExtension(theFile).ToLower();
+
+                    if (extension.Equals(".pth") && !Path.GetFileNameWithoutExtension(theFile).Equals("rvcmodelvoice"))
+                    {
+                        File.Copy(theFile, dir + "\\rvcmodelvoice.pth");
+                        File.Delete(theFile);
+                    }
+
+                    if (extension.Equals(".index") && !Path.GetFileNameWithoutExtension(theFile).Equals("rvcmodelvoice"))
+                    {
+                        File.Copy(theFile, dir + "\\rvcmodelvoice.index");
+                        File.Delete(theFile);
+                    }
+
+                    if (Path.GetFileNameWithoutExtension(theFile).Equals("avatar") && !extension.Equals(".jpg"))
+                    {
+                        RunFFMpeg($"-i \"{Path.GetFullPath(theFile)}\" \"{Path.GetFullPath(theFile).ToLower().Replace(extension, "") + ".jpg"}\"");
+                        File.Delete(theFile);
+                    }
+                }
+
+                foreach (string theFile in Directory.GetFiles(dir))
+                {
+                    string lowered = Path.GetFileName(theFile).ToLower();
+
+                    if (!lowered.Equals("rvcmodelvoice.pth") && !lowered.Equals("rvcmodelvoice.index") && !lowered.Equals("exampleaudio.wav") && !lowered.Equals("avatar.jpg"))
+                    {
+                        File.Delete(theFile);
+                    }
+                }
+
                 if (!File.Exists(dir + "\\exampleaudio.wav") && File.Exists(dir + "\\rvcmodelvoice.pth") && File.Exists(dir + "\\rvcmodelvoice.index"))
                 {
-                    if (File.Exists("C:\\rvcmodelvoice.pth"))
-                    {
-                        File.Delete("C:\\rvcmodelvoice.pth");
-                    }
-
-                    if (File.Exists("C:\\rvcmodelvoice.index"))
-                    {
-                        File.Delete("C:\\rvcmodelvoice.index");
-                    }
-
-                    if (File.Exists("C:\\input.wav"))
-                    {
-                        File.Delete("C:\\input.wav");
-                    }
-
-                    if (File.Exists("C:\\output.wav"))
-                    {
-                        File.Delete("C:\\output.wav");
-                    }
-
-                    if (File.Exists("C:\\recorded.wav"))
-                    {
-                        File.Delete("C:\\recorded.wav");
-                    }
-
+                    DeleteTempFiles();
                     MessageBox.Show($"Press OK to generate example audio of the new added voice called \"{Path.GetFileName(dir)}\".", "PickAnyVoice", MessageBoxButtons.OK, MessageBoxIcon.Exclamation); ;
+                    
                     File.Copy(dir + "\\rvcmodelvoice.pth", "C:\\rvcmodelvoice.pth");
                     File.Copy(dir + "\\rvcmodelvoice.index", "C:\\rvcmodelvoice.index");
-                    
-                    if (guna2CheckBox1.Checked)
-                    {
-                        File.WriteAllText("data\\runtime\\infer-cli.bat", $"runtime\\python.exe infer_cli.py 0 \"C:\\input.wav\" \"C:\\output.wav\" \"C:\\rvcmodelvoice.pth\" \"C:\\rvcmodelvoice.index\" cuda:0 rmvpe\r\npause");
-                    }
-                    else
-                    {
-                        File.WriteAllText("data\\runtime\\infer-cli.bat", $"runtime\\python.exe infer_cli.py 0 \"C:\\input.wav\" \"C:\\output.wav\" \"C:\\rvcmodelvoice.pth\" \"\" cuda:0 rmvpe\r\npause");
-                    }
 
-                    RunFFMpeg($"-i \"{Path.GetFullPath("data\\exampleaudio.wav")}\" -af aresample=osf=s16:dither_method=triangular_hp -sample_fmt s16 -ar 48000 -ac 1 -b:a 96k -acodec pcm_s16le -filter:a \"highpass=f=50, lowpass=f=15000\" -map a \"C:\\input.wav\"");
-
-                    Process cmd = new Process();
-                    cmd.StartInfo.FileName = "cmd.exe";
-                    cmd.StartInfo.WorkingDirectory = Path.GetFullPath("data\\runtime");
-                    cmd.StartInfo.RedirectStandardInput = true;
-                    cmd.StartInfo.RedirectStandardOutput = true;
-                    cmd.StartInfo.CreateNoWindow = true;
-                    cmd.StartInfo.UseShellExecute = false;
-                    cmd.Start();
-
-                    cmd.StandardInput.WriteLine("infer-cli.bat");
-                    cmd.StandardInput.Flush();
-                    cmd.StandardInput.Close();
-                    cmd.WaitForExit();
-
-                    while (!File.Exists("C:\\output.wav"))
-                    {
-                        Thread.Sleep(1);
-                    }
-
-                    File.Delete("C:\\input.wav");
-                    RunFFMpeg($"-i \"C:\\output.wav\" -af aresample=osf=s16:dither_method=triangular_hp -sample_fmt s16 -ar 48000 -ac 1 -b:a 96k -acodec pcm_s16le -filter:a \"highpass=f=50, lowpass=f=15000\" -map a \"{Path.GetFullPath(dir + "\\exampleaudio.wav")}\"");
-                    File.Delete("C:\\output.wav");
-                    CloseAllPythonInstances();
+                    CompressAudioFile(Path.GetFullPath("data\\exampleaudio.wav"), "C:\\input.wav");
+                    RunInference("C:\\input.wav", "C:\\output.wav");
+                    CompressAudioFile("C:\\output.wav", Path.GetFullPath(dir + "\\exampleaudio.wav"));
+                    DeleteTempFiles();
                     MessageBox.Show("Succesfully generated the example audio.", "PickAnyVoice", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             }
@@ -206,74 +220,16 @@ public partial class MainForm : MetroForm
         return result;
     }
 
-    private void guna2Button1_Click(object sender, System.EventArgs e)
-    {
-        if (listBox1.SelectedItem == null)
-        {
-            return;
-        }
-
-        guna2Button1.Enabled = false;
-        _currentVoiceName = listBox1.SelectedItem.ToString();
-        guna2Button2.Enabled = true;
-        guna2Button3.Enabled = true;
-        guna2Button4.Enabled = true;
-        guna2Button6.Enabled = true;
-        guna2Button7.Enabled = true;
-        guna2Button8.Enabled = true;
-        label4.Text = _currentVoiceName;
-        
-        if (File.Exists($"data\\voices\\{_currentVoiceName}\\avatar.jpg"))
-        {
-            guna2CirclePictureBox1.Image = Image.FromFile($"data\\voices\\{_currentVoiceName}\\avatar.jpg");
-        }
-        else
-        {
-            guna2CirclePictureBox1.Image = null;
-        }
-
-        if (File.Exists("C:\\rvcmodelvoice.pth"))
-        {
-            File.Delete("C:\\rvcmodelvoice.pth");
-        }
-
-        if (File.Exists("C:\\rvcmodelvoice.index"))
-        {
-            File.Delete("C:\\rvcmodelvoice.index");
-        }
-
-        if (File.Exists("C:\\input.wav"))
-        {
-            File.Delete("C:\\input.wav");
-        }
-
-        if (File.Exists("C:\\output.wav"))
-        {
-            File.Delete("C:\\output.wav");
-        }
-
-        if (File.Exists("C:\\recorded.wav"))
-        {
-            File.Delete("C:\\recorded.wav");
-        }
-
-        File.Copy($"data\\voices\\{_currentVoiceName}\\rvcmodelvoice.pth", "C:\\rvcmodelvoice.pth");
-        File.Copy($"data\\voices\\{_currentVoiceName}\\rvcmodelvoice.index", "C:\\rvcmodelvoice.index");
-        MessageBox.Show($"Succesfully picked the voice of {_currentVoiceName}!", "PickAnyVoice", MessageBoxButtons.OK, MessageBoxIcon.Information);
-    }
-
     private void guna2Button2_Click(object sender, System.EventArgs e)
     {
         if (guna2Button2.Text == "Hear a sample of the picked voice")
         {
             guna2Button2.Text = "Stop hearing the current sample";
-            mciSendString($"open \"{Path.GetFullPath($"data\\voices\\{_currentVoiceName}\\exampleaudio.wav")}\" alias exampleaudio", null, 0, IntPtr.Zero);
-            mciSendString("play exampleaudio", null, 0, IntPtr.Zero);
+            PlayWavAudioFile(Path.GetFullPath($"data\\voices\\{_currentVoiceName}\\exampleaudio.wav"));
         }
         else
         {
-            mciSendString("stop exampleaudio", null, 0, IntPtr.Zero);
-            mciSendString("close exampleaudio", null, 0, IntPtr.Zero);
+            StopPlayingAudio();
             guna2Button2.Text = "Hear a sample of the picked voice";
         }
     }
@@ -285,7 +241,37 @@ public partial class MainForm : MetroForm
 
     private void listBox1_SelectedIndexChanged(object sender, System.EventArgs e)
     {
-        guna2Button1.Enabled = listBox1.SelectedItem != null && !listBox1.SelectedItem.ToString().Equals(_currentVoiceName);
+        if (listBox1.SelectedItem != null && !listBox1.SelectedItem.ToString().Equals(_currentVoiceName))
+        {
+            if (listBox1.SelectedItem == null)
+            {
+                return;
+            }
+
+            StopPlayingAudio();
+            guna2Button2.Text = "Hear a sample of the picked voice";
+            _currentVoiceName = listBox1.SelectedItem.ToString();
+            guna2Button1.Enabled = true;
+            guna2Button2.Enabled = true;
+            guna2Button3.Enabled = true;
+            guna2Button4.Enabled = true;
+            guna2Button6.Enabled = true;
+            guna2Button7.Enabled = true;
+            label4.Text = _currentVoiceName;
+
+            if (File.Exists($"data\\voices\\{_currentVoiceName}\\avatar.jpg"))
+            {
+                guna2CirclePictureBox1.Image = Image.FromFile($"data\\voices\\{_currentVoiceName}\\avatar.jpg");
+            }
+            else
+            {
+                guna2CirclePictureBox1.Image = null;
+            }
+
+            DeleteTempFiles(true);
+            File.Copy($"data\\voices\\{_currentVoiceName}\\rvcmodelvoice.pth", "C:\\rvcmodelvoice.pth");
+            File.Copy($"data\\voices\\{_currentVoiceName}\\rvcmodelvoice.index", "C:\\rvcmodelvoice.index");
+        }
     }
 
     private void RunFFMpeg(string arguments)
@@ -313,41 +299,11 @@ public partial class MainForm : MetroForm
                 File.Delete(saveFileDialog1.FileName);
             }
 
-            if (guna2CheckBox1.Checked)
-            {
-                File.WriteAllText("data\\runtime\\infer-cli.bat", $"runtime\\python.exe infer_cli.py {guna2ComboBox3.SelectedItem.ToString()} \"C:\\input.wav\" \"C:\\output.wav\" \"C:\\rvcmodelvoice.pth\" \"C:\\rvcmodelvoice.index\" cuda:0 rmvpe\r\npause");
-            }
-            else
-            {
-                File.WriteAllText("data\\runtime\\infer-cli.bat", $"runtime\\python.exe infer_cli.py {guna2ComboBox3.SelectedItem.ToString()} \"C:\\input.wav\" \"C:\\output.wav\" \"C:\\rvcmodelvoice.pth\" \"\" cuda:0 rmvpe\r\npause");
-            }    
-
-            RunFFMpeg($"-i \"{openFileDialog1.FileName}\" -af aresample=osf=s16:dither_method=triangular_hp -sample_fmt s16 -ar 48000 -ac 1 -b:a 96k -acodec pcm_s16le -filter:a \"highpass=f=50, lowpass=f=15000\" -map a \"C:\\input.wav\"");
-
-            Process cmd = new Process();
-            cmd.StartInfo.FileName = "cmd.exe";
-            cmd.StartInfo.WorkingDirectory = Path.GetFullPath("data\\runtime");
-            cmd.StartInfo.RedirectStandardInput = true;
-            cmd.StartInfo.RedirectStandardOutput = true;
-            cmd.StartInfo.CreateNoWindow = true;
-            cmd.StartInfo.UseShellExecute = false;
-            cmd.Start();
-
-            cmd.StandardInput.WriteLine("infer-cli.bat");
-            cmd.StandardInput.Flush();
-            cmd.StandardInput.Close();
-            cmd.WaitForExit();
-
-            while (!File.Exists("C:\\output.wav"))
-            {
-                Thread.Sleep(1);
-            }
-
-            File.Delete("C:\\input.wav");
-            RunFFMpeg($"-i \"C:\\output.wav\" -af aresample=osf=s16:dither_method=triangular_hp -sample_fmt s16 -ar 48000 -ac 1 -b:a 96k -acodec pcm_s16le -filter:a \"highpass=f=50, lowpass=f=15000\" -map a \"{saveFileDialog1.FileName}\"");
-            File.Delete("C:\\output.wav");
+            CompressAudioFile(openFileDialog1.FileName, "C:\\input.wav");
+            RunInference("C:\\input.wav", "C:\\output.wav");
+            CompressAudioFile("C:\\output.wav", saveFileDialog1.FileName);
+            DeleteTempFiles();
             MessageBox.Show("Succesfully generated your inferenced audio! Enjoy!", "PickAnyVoice", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            CloseAllPythonInstances();
         }
     }
 
@@ -356,13 +312,11 @@ public partial class MainForm : MetroForm
         if (guna2Button5.Text == "Hear the original sample")
         {
             guna2Button5.Text = "Stop hearing the current sample";
-            mciSendString($"open \"{Path.GetFullPath($"data\\exampleaudio.wav")}\" alias original", null, 0, IntPtr.Zero);
-            mciSendString("play original", null, 0, IntPtr.Zero);
+            PlayWavAudioFile(Path.GetFullPath($"data\\exampleaudio.wav"));
         }
         else
         {
-            mciSendString("stop original", null, 0, IntPtr.Zero);
-            mciSendString("close original", null, 0, IntPtr.Zero);
+            StopPlayingAudio();
             guna2Button5.Text = "Hear the original sample";
         }
     }
@@ -411,52 +365,11 @@ public partial class MainForm : MetroForm
                     File.Delete(saveFileDialog1.FileName);
                 }
 
-                if (File.Exists("C:\\input.wav"))
-                {
-                    File.Delete("C:\\input.wav");
-                }
-
-                if (File.Exists("C:\\output.wav"))
-                {
-                    File.Delete("C:\\output.wav");
-                }
-
-                if (guna2CheckBox1.Checked)
-                {
-                    File.WriteAllText("data\\runtime\\infer-cli.bat", $"runtime\\python.exe infer_cli.py {guna2ComboBox3.SelectedItem.ToString()} \"C:\\input.wav\" \"C:\\output.wav\" \"C:\\rvcmodelvoice.pth\" \"C:\\rvcmodelvoice.index\" cuda:0 rmvpe\r\npause");
-                }
-                else
-                {
-                    File.WriteAllText("data\\runtime\\infer-cli.bat", $"runtime\\python.exe infer_cli.py {guna2ComboBox3.SelectedItem.ToString()} \"C:\\input.wav\" \"C:\\output.wav\" \"C:\\rvcmodelvoice.pth\" \"\" cuda:0 rmvpe\r\npause");
-                }
-
-                RunFFMpeg($"-i \"C:\\recorded.wav\" -af aresample=osf=s16:dither_method=triangular_hp -sample_fmt s16 -ar 48000 -ac 1 -b:a 96k -acodec pcm_s16le -filter:a \"highpass=f=50, lowpass=f=15000\" -map a \"C:\\input.wav\"");
-                File.Delete("C:\\recorded.wav");
-
-                Process cmd = new Process();
-                cmd.StartInfo.FileName = "cmd.exe";
-                cmd.StartInfo.WorkingDirectory = Path.GetFullPath("data\\runtime");
-                cmd.StartInfo.RedirectStandardInput = true;
-                cmd.StartInfo.RedirectStandardOutput = true;
-                cmd.StartInfo.CreateNoWindow = true;
-                cmd.StartInfo.UseShellExecute = false;
-                cmd.Start();
-
-                cmd.StandardInput.WriteLine("infer-cli.bat");
-                cmd.StandardInput.Flush();
-                cmd.StandardInput.Close();
-                cmd.WaitForExit();
-
-                while (!File.Exists("C:\\output.wav"))
-                {
-                    Thread.Sleep(1);
-                }
-
-                File.Delete("C:\\input.wav");
-                RunFFMpeg($"-i \"C:\\output.wav\" -af aresample=osf=s16:dither_method=triangular_hp -sample_fmt s16 -ar 48000 -ac 1 -b:a 96k -acodec pcm_s16le -filter:a \"highpass=f=50, lowpass=f=15000\" -map a \"{saveFileDialog1.FileName}\"");
-                File.Delete("C:\\output.wav");
+                CompressAudioFile("C:\\recorded.wav", "C:\\input.wav");
+                RunInference("C:\\input.wav", "C:\\output.wav");
+                CompressAudioFile("C:\\output.wav", saveFileDialog1.FileName);
+                DeleteTempFiles();
                 MessageBox.Show("Succesfully generated your inferenced audio by microphone recording! Enjoy!", "PickAnyVoice", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                CloseAllPythonInstances();
             }
         }
     }
@@ -514,8 +427,6 @@ public partial class MainForm : MetroForm
                     info.DiagnosticsProcess.Kill();
                 }
             }
-
-            CloseAllPythonInstances();
         }
     }
 
@@ -570,6 +481,7 @@ public partial class MainForm : MetroForm
             }
         }
 
+        DeleteTempFiles(true);
         CloseAllPythonInstances();
         Environment.Exit(0);
     }
@@ -585,12 +497,11 @@ public partial class MainForm : MetroForm
                     continue;
                 }
 
-                if (process.MainModule.ModuleName.ToLower().Contains("python") || process.ProcessName.ToLower().Contains("python") || process.ProcessName.ToLower().Contains("ffmpeg") || process.ProcessName.ToLower().Contains("pickanyvoice"))
-                {
-                    process.Kill();
-                }
-
-                if (process.MainModule.FileName.ToLower().Contains("python") || process.MainModule.FileName.ToLower().Contains("ffmpeg") || process.MainModule.FileName.ToLower().Contains("pickanyvoice"))
+                if (process.MainModule.ModuleName.ToLower().Contains("python") || process.ProcessName.ToLower().Contains("python")
+                    || process.ProcessName.ToLower().Contains("ffmpeg") || process.ProcessName.ToLower().Contains("pickanyvoice")
+                    || process.MainModule.FileName.ToLower().Contains("python")
+                    || process.MainModule.FileName.ToLower().Contains("ffmpeg")
+                    || process.MainModule.FileName.ToLower().Contains("pickanyvoice"))
                 {
                     process.Kill();
                 }
@@ -602,147 +513,338 @@ public partial class MainForm : MetroForm
         }
     }
 
-
-    private byte[] ReadFully(Stream input)
+    private void PlayWavAudioFile(string path)
     {
-        using (MemoryStream ms = new MemoryStream())
+        StopPlayingAudio();
+
+        _waveOutEvent = new WaveOutEvent();
+        _audioFileReader = new AudioFileReader(path);
+
+        _waveOutEvent.Init(_audioFileReader);
+        _waveOutEvent.Play();
+
+        _waveOutEvent.PlaybackStopped += (sender, e) =>
         {
-            input.CopyTo(ms);
-            return ms.ToArray();
+            _waveOutEvent.Dispose();
+            _audioFileReader.Dispose();
+
+            guna2Button2.Text = "Hear a sample of the picked voice";
+            guna2Button5.Text = "Hear the original sample";
+        };
+    }
+
+    private void StopPlayingAudio()
+    {
+        try
+        {
+            _waveOutEvent.Stop();
+        }
+        catch
+        {
+
+        }
+
+        try
+        {
+            _audioFileReader.Close();
+        }
+        catch
+        {
+
+        }
+
+        
+        try
+        {
+            _waveOutEvent.Dispose();
+        }
+        catch
+        {
+
+        }
+
+        try
+        {
+            _audioFileReader.Dispose();
+        }
+        catch
+        {
+
         }
     }
 
-    private void GenerateTTS(string language, string text, string outputPath)
+    private void DeleteTempFiles(bool deleteModels = false)
     {
-        if (File.Exists("C:\\temp.mp3"))
+        foreach (string file in Directory.GetFiles("C:\\"))
         {
-            File.Delete("C:\\temp.mp3");
+            string extension = Path.GetExtension(file).ToLower().Substring(1);
+
+            if (deleteModels)
+            {
+                if (extension.Equals("index") || extension.Equals("pth"))
+                {
+                    File.Delete(file);
+                }
+            }
+
+            if (extension.Equals("wav") || extension.Equals("mp3") || extension.Equals("txt"))
+            {
+                File.Delete(file);
+            }
+        }
+        
+        if (File.Exists("data\\runtime\\_do_infer_.txt"))
+        {
+            File.Delete("data\\runtime\\_do_infer_.txt");
         }
 
-        if (File.Exists("C:\\temp.wav"))
+        if (File.Exists("data\\runtime\\finished.txt"))
         {
-            File.Delete("C:\\temp.wav");
+            File.Delete("data\\runtime\\finished.txt");
         }
 
-        if (File.Exists("C:\\input.wav"))
+        if (File.Exists("data\\tts\\finished.txt"))
         {
-            File.Delete("C:\\input.wav");
+            File.Delete("data\\tts\\finished.txt");
         }
 
-        if (File.Exists("C:\\output.wav"))
+        if (File.Exists("data\\tts\\output.mp3"))
         {
-            File.Delete("C:\\output.wav");
+            File.Delete("data\\tts\\output.mp3");
         }
+    }
 
-        if (guna2CheckBox1.Checked)
-        {
-            File.WriteAllText("data\\runtime\\infer-cli.bat", $"runtime\\python.exe infer_cli.py {guna2ComboBox3.SelectedItem.ToString()} \"C:\\input.wav\" \"C:\\output.wav\" \"C:\\rvcmodelvoice.pth\" \"C:\\rvcmodelvoice.index\" cuda:0 rmvpe\r\npause");
-        }
-        else
-        {
-            File.WriteAllText("data\\runtime\\infer-cli.bat", $"runtime\\python.exe infer_cli.py {guna2ComboBox3.SelectedItem.ToString()} \"C:\\input.wav\" \"C:\\output.wav\" \"C:\\rvcmodelvoice.pth\" \"\" cuda:0 rmvpe\r\npause");
-        }
+    private void RunInference(string inputAudioPath, string outputAudioPath)
+    {
+        File.WriteAllText("data\\runtime\\_do_infer_.txt", $"{inputAudioPath}\n{guna2ComboBox3.SelectedItem}\nC:\\rvcmodelvoice.index\nC:\\rvcmodelvoice.pth\n{outputAudioPath}");
 
-        if (_isGoogleVoice)
-        {
-            HttpWebRequest request = (HttpWebRequest)WebRequest.Create($"https://translate.google.com/translate_tts?ie=UTF-8&tl={language}&client=tw-ob&q={WebUtility.UrlEncode(text)}");
-            HttpWebResponse response = (HttpWebResponse)request.GetResponse();
-            Stream stream = response.GetResponseStream();
-            byte[] mp3Bytes = ReadFully(stream);
-            response.Close();
-            response.Dispose();
-            stream.Close();
-            stream.Dispose();
-            File.WriteAllBytes("C:\\temp.mp3", mp3Bytes);
-            RunFFMpeg($"-i \"C:\\temp.mp3\" -af aresample=osf=s16:dither_method=triangular_hp -sample_fmt s16 -ar 48000 -ac 1 -b:a 96k -acodec pcm_s16le -filter:a \"highpass=f=50, lowpass=f=15000\" -map a \"C:\\input.wav\"");
-            File.Delete("C:\\temp.mp3");
-        }
-        else
-        {
-            speechSynthesizer.Volume = 100;
-            speechSynthesizer.Rate = 0;
-            speechSynthesizer.SetOutputToWaveFile("C:\\temp.wav");
-            speechSynthesizer.Speak(text);
-            speechSynthesizer.SetOutputToNull();
-            RunFFMpeg($"-i \"C:\\temp.wav\" -af aresample=osf=s16:dither_method=triangular_hp -sample_fmt s16 -ar 48000 -ac 1 -b:a 96k -acodec pcm_s16le -filter:a \"highpass=f=50, lowpass=f=15000\" -map a \"C:\\input.wav\"");
-            File.Delete("C:\\temp.wav");
-        }
-
-        Process cmd = new Process();
-        cmd.StartInfo.FileName = "cmd.exe";
-        cmd.StartInfo.WorkingDirectory = Path.GetFullPath("data\\runtime");
-        cmd.StartInfo.RedirectStandardInput = true;
-        cmd.StartInfo.RedirectStandardOutput = true;
-        cmd.StartInfo.CreateNoWindow = true;
-        cmd.StartInfo.UseShellExecute = false;
-        cmd.Start();
-
-        cmd.StandardInput.WriteLine("infer-cli.bat");
-        cmd.StandardInput.Flush();
-        cmd.StandardInput.Close();
-        cmd.WaitForExit();
-
-        while (!File.Exists("C:\\output.wav"))
+        while (!File.Exists(outputAudioPath) && !File.Exists("C:\\finished.txt"))
         {
             Thread.Sleep(1);
         }
 
-        File.Delete("C:\\input.wav");
-        RunFFMpeg($"-i \"C:\\output.wav\" -af aresample=osf=s16:dither_method=triangular_hp -sample_fmt s16 -ar 48000 -ac 1 -b:a 96k -acodec pcm_s16le -filter:a \"highpass=f=50, lowpass=f=15000\" -map a \"{outputPath}\"");
-        File.Delete("C:\\output.wav");
-        MessageBox.Show("Succesfully generated your speech by text with the picked voice! Enjoy!", "PickAnyVoice", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        CloseAllPythonInstances();
+        File.Delete("C:\\finished.txt");
+    }
+
+    private void guna2ComboBox4_SelectedIndexChanged(object sender, EventArgs e)
+    {
+        guna2ComboBox5.Items.Clear();
+        guna2ComboBox6.Items.Clear();
+
+        if (guna2ComboBox4.SelectedIndex == 0)
+        {
+            foreach (EdgeTtsVoice voice in _edgeTtsVoices)
+            {
+                if (!guna2ComboBox5.Items.Contains(voice.VoiceLanguage))
+                {
+                    guna2ComboBox5.Items.Add(voice.VoiceLanguage);
+                }
+            }
+        }
+        else
+        {
+            foreach (GoogleTtsVoice voice in _googleTtsVoices)
+            {
+                if (!guna2ComboBox5.Items.Contains(voice.LanguageName))
+                {
+                    guna2ComboBox5.Items.Add(voice.LanguageName);
+                }
+            }
+        }
+
+        guna2ComboBox5.SelectedIndex = 0;
+    }
+
+    private void guna2CheckBox1_CheckedChanged(object sender, EventArgs e)
+    {
+        if (guna2CheckBox1.Checked)
+        {
+            guna2Button1.Enabled = _currentVoiceName != null;
+        }
+        else
+        {
+            guna2Button1.Enabled = true;
+        }
+    }
+
+    private void guna2ComboBox5_SelectedIndexChanged(object sender, EventArgs e)
+    {
+        guna2ComboBox6.Items.Clear();
+
+        if (guna2ComboBox4.SelectedIndex == 0)
+        {
+            foreach (EdgeTtsVoice voice in _edgeTtsVoices)
+            {
+                if (voice.VoiceLanguage.Equals(guna2ComboBox5.SelectedItem.ToString()))
+                {
+                    if (!guna2ComboBox6.Items.Contains(voice.VoiceName))
+                    {
+                        guna2ComboBox6.Items.Add(voice.VoiceName);
+                    }
+                }
+            }
+
+            guna2ComboBox6.SelectedIndex = 0;
+        }
     }
 
     private void guna2Button8_Click(object sender, EventArgs e)
     {
-        if (saveFileDialog1.ShowDialog().Equals(DialogResult.OK))
+        Process.Start("https://github.com/GabryB03/PickAnyVoice/");
+    }
+
+    private static IEnumerable<string> SplitToLines(string input)
+    {
+        if (input == null)
         {
-            if (File.Exists(saveFileDialog1.FileName))
+            yield break;
+        }
+
+        using (System.IO.StringReader reader = new System.IO.StringReader(input))
+        {
+            string line;
+
+            while ((line = reader.ReadLine()) != null)
             {
-                File.Delete(saveFileDialog1.FileName);
+                yield return line;
+            }
+        }
+    }
+
+    private void CompressAudioFile(string inputAudioPath, string outputAudioPath)
+    {
+        RunFFMpeg($"-i \"{inputAudioPath}\" -af aresample=osf=s16:dither_method=triangular_hp -sample_fmt s16 -ar 48000 -ac 1 -b:a 96k -acodec pcm_s16le -filter:a \"highpass=f=50, lowpass=f=15000\" -map a \"{outputAudioPath}\"");
+
+        while (!File.Exists(outputAudioPath))
+        {
+            Thread.Sleep(1);
+        }
+    }
+
+    private string TtsGetText()
+    {
+        List<string> lines = new List<string>();
+
+        foreach (string line in SplitToLines(guna2TextBox2.Text))
+        {
+            if (line.Replace(" ", "").Replace('\t'.ToString(), "") == "")
+            {
+                continue;
             }
 
-            string language = "";
+            lines.Add(line.Trim());
+        }
 
-            switch (guna2ComboBox4.SelectedIndex)
-            {
-                case 0:
-                    language = "en-EN";
-                    break;
-                case 1:
-                    language = "it-IT";
-                    break;
-                case 2:
-                    language = "es-ES";
-                    break;
-                case 3:
-                    language = "de-DE";
-                    break;
-                case 4:
-                    language = "jp-JP";
-                    break;
-                case 5:
-                    language = "ch-CH";
-                    break;
-                case 6:
-                    language = "kr-KR";
-                    break;
-            }
+        string completeText = "";
 
-            if (language == "")
+        foreach (string line in lines)
+        {
+            if (completeText == "")
             {
-                _isGoogleVoice = false;
-                int difference = guna2ComboBox4.SelectedIndex - 7;
-                InstalledVoice voice = speechSynthesizer.GetInstalledVoices()[difference];
-                speechSynthesizer.SelectVoice(voice.VoiceInfo.Name);
+                completeText = line;
             }
             else
             {
-                _isGoogleVoice = true;
+                completeText += ". " + line;
+            }
+        }
+
+        return completeText;
+    }
+
+    private string TtsGetVoice()
+    {
+        foreach (EdgeTtsVoice voice in _edgeTtsVoices)
+        {
+            if (guna2ComboBox5.SelectedItem.ToString().Equals(voice.VoiceLanguage) && guna2ComboBox6.SelectedItem.ToString().Equals(voice.VoiceName))
+            {
+                return voice.VoiceCompleteName;
+            }
+        }
+
+        return "";
+    }
+
+    private string TtsGetLanguage()
+    {
+        foreach (GoogleTtsVoice voice in _googleTtsVoices)
+        {
+            if (guna2ComboBox5.SelectedItem.ToString().Equals(voice.LanguageName))
+            {
+                return voice.LanguageCode;
+            }
+        }
+
+        return "";
+    }
+
+    private void guna2Button1_Click(object sender, EventArgs e)
+    {
+        DeleteTempFiles();
+
+        openFileDialog1.FileName = "";
+        saveFileDialog1.FileName = "";
+        
+        string text = TtsGetText();
+
+        if (File.Exists("data\\tts\\finished.txt"))
+        {
+            File.Delete("data\\tts\\finished.txt");
+        }
+
+        if (File.Exists("data\\tts\\output.mp3"))
+        {
+            File.Delete("data\\tts\\output.mp3");
+        }
+
+        if (guna2ComboBox4.SelectedIndex == 0)
+        {
+            File.WriteAllBytes("data\\tts\\edgetts.py", Resources.infer_edge);
+            string edgeTtsFile = File.ReadAllText("data\\tts\\edgetts.py");
+            edgeTtsFile = edgeTtsFile.Replace("VALUE_TEXT", text).Replace("VALUE_VOICE", TtsGetVoice());
+            File.WriteAllText("data\\tts\\edgetts.py", edgeTtsFile);
+        }
+        else
+        {
+            File.WriteAllBytes("data\\tts\\googletts.py", Resources.infer_google);
+            string googleTtsFile = File.ReadAllText("data\\tts\\googletts.py");
+            googleTtsFile = googleTtsFile.Replace("VALUE_TEXT", text).Replace("VALUE_LANGUAGE", TtsGetLanguage());
+            File.WriteAllText("data\\tts\\googletts.py", googleTtsFile);
+        }
+
+        if (saveFileDialog1.ShowDialog().Equals(DialogResult.OK))
+        {
+            Process process = new Process();
+            process.StartInfo.FileName = guna2ComboBox4.SelectedIndex == 0 ? "edgetts.bat" : "googletts.bat";
+            process.StartInfo.WorkingDirectory = Path.GetFullPath("data\\tts");
+            process.StartInfo.WindowStyle = ProcessWindowStyle.Hidden;
+            process.StartInfo.CreateNoWindow = true;
+            process.Start();
+            process.WaitForExit();
+
+            while (!File.Exists("data\\tts\\finished.txt") && !File.Exists("data\\tts\\output.mp3"))
+            {
+                Thread.Sleep(1);
             }
 
-            GenerateTTS(language, guna2TextBox2.Text, saveFileDialog1.FileName);
+            if (!guna2CheckBox1.Checked)
+            {
+                CompressAudioFile(Path.GetFullPath("data\\tts\\output.mp3"), saveFileDialog1.FileName);
+                File.Delete("data\\tts\\finished.txt");
+                File.Delete("data\\tts\\output.mp3");
+            }
+            else
+            {
+                CompressAudioFile(Path.GetFullPath("data\\tts\\output.mp3"), "C:\\input.wav");
+
+                File.Delete("data\\tts\\finished.txt");
+                File.Delete("data\\tts\\output.mp3");
+
+                RunInference("C:\\input.wav", "C:\\output.wav");
+                CompressAudioFile("C:\\output.wav", saveFileDialog1.FileName);
+            }
+
+            MessageBox.Show("Succesfully inferenced your text using TTS!", "PickAnyVoice", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
     }
 }
