@@ -39,12 +39,14 @@
             this.panel3 = new System.Windows.Forms.Panel();
             this.guna2ComboBox6 = new Guna.UI2.WinForms.Guna2ComboBox();
             this.guna2CheckBox1 = new Guna.UI2.WinForms.Guna2CheckBox();
-            this.guna2Button1 = new Guna.UI2.WinForms.Guna2Button();
             this.guna2ComboBox5 = new Guna.UI2.WinForms.Guna2ComboBox();
             this.guna2ComboBox4 = new Guna.UI2.WinForms.Guna2ComboBox();
+            this.guna2Button1 = new Guna.UI2.WinForms.Guna2Button();
             this.guna2TextBox2 = new Guna.UI2.WinForms.Guna2TextBox();
             this.panel4 = new System.Windows.Forms.Panel();
             this.guna2Button8 = new Guna.UI2.WinForms.Guna2Button();
+            this.label2 = new System.Windows.Forms.Label();
+            this.guna2ComboBox7 = new Guna.UI2.WinForms.Guna2ComboBox();
             this.panel1.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.guna2CirclePictureBox1)).BeginInit();
             this.panel2.SuspendLayout();
@@ -81,6 +83,8 @@
             // 
             this.panel1.BackgroundImageLayout = System.Windows.Forms.ImageLayout.None;
             this.panel1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.panel1.Controls.Add(this.guna2ComboBox7);
+            this.panel1.Controls.Add(this.label2);
             this.panel1.Controls.Add(this.label1);
             this.panel1.Controls.Add(this.guna2ComboBox3);
             this.panel1.Controls.Add(this.guna2Button5);
@@ -146,7 +150,7 @@
             "12"});
             this.guna2ComboBox3.Location = new System.Drawing.Point(280, 94);
             this.guna2ComboBox3.Name = "guna2ComboBox3";
-            this.guna2ComboBox3.Size = new System.Drawing.Size(131, 36);
+            this.guna2ComboBox3.Size = new System.Drawing.Size(178, 36);
             this.guna2ComboBox3.TabIndex = 7;
             // 
             // guna2Button5
@@ -444,25 +448,6 @@
             this.guna2CheckBox1.UncheckedState.FillColor = System.Drawing.Color.FromArgb(((int)(((byte)(125)))), ((int)(((byte)(137)))), ((int)(((byte)(149)))));
             this.guna2CheckBox1.CheckedChanged += new System.EventHandler(this.guna2CheckBox1_CheckedChanged);
             // 
-            // guna2Button1
-            // 
-            this.guna2Button1.Animated = true;
-            this.guna2Button1.DisabledState.BorderColor = System.Drawing.Color.DarkGray;
-            this.guna2Button1.DisabledState.CustomBorderColor = System.Drawing.Color.DarkGray;
-            this.guna2Button1.DisabledState.FillColor = System.Drawing.Color.FromArgb(((int)(((byte)(169)))), ((int)(((byte)(169)))), ((int)(((byte)(169)))));
-            this.guna2Button1.DisabledState.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(141)))), ((int)(((byte)(141)))), ((int)(((byte)(141)))));
-            this.guna2Button1.Enabled = false;
-            this.guna2Button1.FillColor = System.Drawing.Color.FromArgb(((int)(((byte)(0)))), ((int)(((byte)(122)))), ((int)(((byte)(204)))));
-            this.guna2Button1.Font = new System.Drawing.Font("Segoe UI", 9F);
-            this.guna2Button1.ForeColor = System.Drawing.Color.White;
-            this.guna2Button1.HoverState.FillColor = System.Drawing.Color.FromArgb(((int)(((byte)(0)))), ((int)(((byte)(91)))), ((int)(((byte)(153)))));
-            this.guna2Button1.Location = new System.Drawing.Point(14, 276);
-            this.guna2Button1.Name = "guna2Button1";
-            this.guna2Button1.Size = new System.Drawing.Size(116, 45);
-            this.guna2Button1.TabIndex = 10;
-            this.guna2Button1.Text = "Do infer with TTS";
-            this.guna2Button1.Click += new System.EventHandler(this.guna2Button1_Click);
-            // 
             // guna2ComboBox5
             // 
             this.guna2ComboBox5.BackColor = System.Drawing.Color.Transparent;
@@ -504,6 +489,25 @@
             this.guna2ComboBox4.Size = new System.Drawing.Size(238, 36);
             this.guna2ComboBox4.TabIndex = 8;
             this.guna2ComboBox4.SelectedIndexChanged += new System.EventHandler(this.guna2ComboBox4_SelectedIndexChanged);
+            // 
+            // guna2Button1
+            // 
+            this.guna2Button1.Animated = true;
+            this.guna2Button1.DisabledState.BorderColor = System.Drawing.Color.DarkGray;
+            this.guna2Button1.DisabledState.CustomBorderColor = System.Drawing.Color.DarkGray;
+            this.guna2Button1.DisabledState.FillColor = System.Drawing.Color.FromArgb(((int)(((byte)(169)))), ((int)(((byte)(169)))), ((int)(((byte)(169)))));
+            this.guna2Button1.DisabledState.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(141)))), ((int)(((byte)(141)))), ((int)(((byte)(141)))));
+            this.guna2Button1.Enabled = false;
+            this.guna2Button1.FillColor = System.Drawing.Color.FromArgb(((int)(((byte)(0)))), ((int)(((byte)(122)))), ((int)(((byte)(204)))));
+            this.guna2Button1.Font = new System.Drawing.Font("Segoe UI", 9F);
+            this.guna2Button1.ForeColor = System.Drawing.Color.White;
+            this.guna2Button1.HoverState.FillColor = System.Drawing.Color.FromArgb(((int)(((byte)(0)))), ((int)(((byte)(91)))), ((int)(((byte)(153)))));
+            this.guna2Button1.Location = new System.Drawing.Point(14, 276);
+            this.guna2Button1.Name = "guna2Button1";
+            this.guna2Button1.Size = new System.Drawing.Size(116, 45);
+            this.guna2Button1.TabIndex = 10;
+            this.guna2Button1.Text = "Do infer with TTS";
+            this.guna2Button1.Click += new System.EventHandler(this.guna2Button1_Click);
             // 
             // guna2TextBox2
             // 
@@ -557,6 +561,35 @@
             this.guna2Button8.TabIndex = 7;
             this.guna2Button8.Text = "Support the project on GitHub";
             this.guna2Button8.Click += new System.EventHandler(this.guna2Button8_Click);
+            // 
+            // label2
+            // 
+            this.label2.AutoSize = true;
+            this.label2.Location = new System.Drawing.Point(277, 138);
+            this.label2.Name = "label2";
+            this.label2.Size = new System.Drawing.Size(121, 15);
+            this.label2.TabIndex = 10;
+            this.label2.Text = "Force voice accent in:";
+            // 
+            // guna2ComboBox7
+            // 
+            this.guna2ComboBox7.BackColor = System.Drawing.Color.Transparent;
+            this.guna2ComboBox7.BorderColor = System.Drawing.SystemColors.ControlDark;
+            this.guna2ComboBox7.DrawMode = System.Windows.Forms.DrawMode.OwnerDrawFixed;
+            this.guna2ComboBox7.DropDownHeight = 500;
+            this.guna2ComboBox7.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.guna2ComboBox7.FillColor = System.Drawing.Color.FromArgb(((int)(((byte)(40)))), ((int)(((byte)(40)))), ((int)(((byte)(40)))));
+            this.guna2ComboBox7.FocusedColor = System.Drawing.Color.FromArgb(((int)(((byte)(0)))), ((int)(((byte)(122)))), ((int)(((byte)(204)))));
+            this.guna2ComboBox7.FocusedState.BorderColor = System.Drawing.Color.FromArgb(((int)(((byte)(0)))), ((int)(((byte)(122)))), ((int)(((byte)(204)))));
+            this.guna2ComboBox7.Font = new System.Drawing.Font("Segoe UI", 10F);
+            this.guna2ComboBox7.ForeColor = System.Drawing.SystemColors.ControlDark;
+            this.guna2ComboBox7.IntegralHeight = false;
+            this.guna2ComboBox7.ItemHeight = 30;
+            this.guna2ComboBox7.Location = new System.Drawing.Point(280, 162);
+            this.guna2ComboBox7.Name = "guna2ComboBox7";
+            this.guna2ComboBox7.Size = new System.Drawing.Size(180, 36);
+            this.guna2ComboBox7.TabIndex = 11;
+            this.guna2ComboBox7.SelectedIndexChanged += new System.EventHandler(this.guna2ComboBox7_SelectedIndexChanged);
             // 
             // MainForm
             // 
@@ -624,4 +657,6 @@
     private Guna.UI2.WinForms.Guna2ComboBox guna2ComboBox6;
     private System.Windows.Forms.Panel panel4;
     private Guna.UI2.WinForms.Guna2Button guna2Button8;
+    private Guna.UI2.WinForms.Guna2ComboBox guna2ComboBox7;
+    private System.Windows.Forms.Label label2;
 }

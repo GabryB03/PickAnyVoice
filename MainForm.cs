@@ -99,10 +99,18 @@ public partial class MainForm : MetroForm
             _googleTtsVoices.Add(new GoogleTtsVoice(languageCode, languageName));
         }
 
+        guna2ComboBox7.Items.Add("None");
+
+        foreach (string dir in Directory.GetFiles("data\\custom_index"))
+        {
+            guna2ComboBox7.Items.Add(Path.GetFileNameWithoutExtension(dir));
+        }
+
         guna2ComboBox1.SelectedIndex = 0;
         guna2ComboBox2.SelectedIndex = 0;
         guna2ComboBox3.SelectedIndex = 12;
         guna2ComboBox4.SelectedIndex = 0;
+        guna2ComboBox7.SelectedIndex = 0;
     }
 
     private void StartInferWaiter()
@@ -270,7 +278,15 @@ public partial class MainForm : MetroForm
 
             DeleteTempFiles(true);
             File.Copy($"data\\voices\\{_currentVoiceName}\\rvcmodelvoice.pth", "C:\\rvcmodelvoice.pth");
-            File.Copy($"data\\voices\\{_currentVoiceName}\\rvcmodelvoice.index", "C:\\rvcmodelvoice.index");
+            
+            if (guna2ComboBox7.SelectedIndex == 0)
+            {
+                File.Copy($"data\\voices\\{_currentVoiceName}\\rvcmodelvoice.index", "C:\\rvcmodelvoice.index");
+            }
+            else
+            {
+                File.Copy($"data\\custom_index\\{guna2ComboBox7.SelectedItem}.index", "C:\\rvcmodelvoice.index");
+            }
         }
     }
 
@@ -501,7 +517,8 @@ public partial class MainForm : MetroForm
                     || process.ProcessName.ToLower().Contains("ffmpeg") || process.ProcessName.ToLower().Contains("pickanyvoice")
                     || process.MainModule.FileName.ToLower().Contains("python")
                     || process.MainModule.FileName.ToLower().Contains("ffmpeg")
-                    || process.MainModule.FileName.ToLower().Contains("pickanyvoice"))
+                    || process.MainModule.FileName.ToLower().Contains("pickanyvoice")
+                    || process.ProcessName.ToLower().Equals("cmd"))
                 {
                     process.Kill();
                 }
@@ -776,6 +793,25 @@ public partial class MainForm : MetroForm
         }
 
         return "";
+    }
+
+    private void guna2ComboBox7_SelectedIndexChanged(object sender, EventArgs e)
+    {
+        if (_currentVoiceName == "" || _currentVoiceName == null)
+        {
+            return;
+        }
+
+        File.Delete("C:\\rvcmodelvoice.index");
+
+        if (guna2ComboBox7.SelectedIndex == 0)
+        {
+            File.Copy($"data\\voices\\{_currentVoiceName}\\rvcmodelvoice.index", "C:\\rvcmodelvoice.index");
+        }
+        else
+        {
+            File.Copy($"data\\custom_index\\{guna2ComboBox7.SelectedItem}.index", "C:\\rvcmodelvoice.index");
+        }
     }
 
     private void guna2Button1_Click(object sender, EventArgs e)
